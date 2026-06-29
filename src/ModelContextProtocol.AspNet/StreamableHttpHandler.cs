@@ -3,6 +3,7 @@ using Microsoft.Extensions.Options;
 using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
 using System.Diagnostics.CodeAnalysis;
+using System.Security.Claims;
 using System.Text.Json;
 using System.Text.Json.Serialization.Metadata;
 
@@ -67,6 +68,12 @@ public sealed class StreamableHttpHandler
     public async Task HandlePostAsync(IDictionary<string, object> environment)
     {
         var context = new OwinMcpContext(environment);
+
+        if (!HasJsonContentType(context))
+        {
+            context.StatusCode = 415;
+            return;
+        }
 
         if (!ValidateProtocolVersionHeader(context, out var protocolVersionError))
         {
@@ -174,6 +181,15 @@ public sealed class StreamableHttpHandler
             return;
         }
 
+        if (!session.HasSameUserId(context.User))
+        {
+            await WriteJsonRpcErrorAsync(
+                context,
+                "Forbidden: The currently authenticated user does not match the user who initiated the session.",
+                403);
+            return;
+        }
+
         if (!session.TryStartGetRequest())
         {
             await WriteJsonRpcErrorAsync(
@@ -208,7 +224,21 @@ public sealed class StreamableHttpHandler
         }
 
         var sessionId = context.GetRequestHeader(McpSessionIdHeaderName);
-        if (!string.IsNullOrEmpty(sessionId) && _sessionManager.TryRemove(sessionId, out var session))
+        if (string.IsNullOrEmpty(sessionId) || !_sessionManager.TryGetValue(sessionId, out var session))
+        {
+            return;
+        }
+
+        if (!session.HasSameUserId(context.User))
+        {
+            await WriteJsonRpcErrorAsync(
+                context,
+                "Forbidden: The currently authenticated user does not match the user who initiated the session.",
+                403);
+            return;
+        }
+
+        if (_sessionManager.TryRemove(sessionId, out session))
         {
             await session.DisposeAsync();
         }
@@ -268,6 +298,15 @@ public sealed class StreamableHttpHandler
             return null;
         }
 
+        if (!session.HasSameUserId(context.User))
+        {
+            await WriteJsonRpcErrorAsync(
+                context,
+                "Forbidden: The currently authenticated user does not match the user who initiated the session.",
+                403);
+            return null;
+        }
+
         context.SetResponseHeader(McpSessionIdHeaderName, session.Id);
         return session;
     }
@@ -323,7 +362,7 @@ public sealed class StreamableHttpHandler
         }
 
         var server = McpServer.Create(transport, mcpServerOptions, _loggerFactory, mcpServerServices);
-        var session = new StreamableHttpSession(sessionId, transport, server, _sessionManager);
+        var session = new StreamableHttpSession(sessionId, transport, server, GetUserIdClaim(context.User), _sessionManager);
 
 #pragma warning disable MCPEXP002
         var runSessionAsync = HttpServerTransportOptions.RunSessionHandler ?? RunSessionAsync;
@@ -331,6 +370,20 @@ public sealed class StreamableHttpHandler
         session.ServerRunTask = runSessionAsync(context.EnvironmentView, server, session.SessionClosed);
 
         return session;
+    }
+
+    internal static UserIdClaim? GetUserIdClaim(ClaimsPrincipal user)
+    {
+        if (user?.Identity?.IsAuthenticated != true)
+        {
+            return null;
+        }
+
+        var claim = user.FindFirst(ClaimTypes.NameIdentifier) ??
+            user.FindFirst("sub") ??
+            user.FindFirst(ClaimTypes.Upn);
+
+        return claim is null ? null : new UserIdClaim(claim.Type, claim.Value, claim.Issuer);
     }
 
     private static Task RunSessionAsync(IDictionary<string, object> _, McpServer session, CancellationToken cancellationToken)
@@ -477,6 +530,17 @@ public sealed class StreamableHttpHandler
         }
 
         return false;
+    }
+
+    private static bool HasJsonContentType(OwinMcpContext context)
+    {
+        var contentType = context.GetRequestHeader("Content-Type");
+        if (string.IsNullOrWhiteSpace(contentType))
+        {
+            return false;
+        }
+
+        return string.Equals(contentType.Split(';')[0].Trim(), "application/json", StringComparison.OrdinalIgnoreCase);
     }
 
     private static Task WriteJsonRpcErrorAsync(OwinMcpContext context, string errorMessage, int statusCode, int errorCode = -32000)

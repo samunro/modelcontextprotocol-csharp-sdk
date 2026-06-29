@@ -1,12 +1,10 @@
+using Microsoft.Extensions.DependencyInjection;
 using Owin;
 
 namespace ModelContextProtocol.AspNet;
 
 /// <summary>
 /// OWIN middleware that exposes the Streamable HTTP handler at the root path.
-/// </summary>
-/// <summary>
-/// OWIN middleware that routes root POST requests to the MCP streamable HTTP handler.
 /// </summary>
 public sealed class OwinMcpMiddleware
 {
@@ -27,24 +25,27 @@ public sealed class OwinMcpMiddleware
     /// <summary>
     /// Invokes the middleware for the current OWIN environment.
     /// </summary>
-    public Task Invoke(IDictionary<string, object> environment)
+    public async Task Invoke(IDictionary<string, object> environment)
     {
         var requestPath = (string)environment["owin.RequestPath"]!;
         if (!string.Equals(requestPath, "/", StringComparison.Ordinal) && !string.Equals(requestPath, string.Empty, StringComparison.Ordinal))
         {
-            return _next(environment);
+            await _next(environment);
+            return;
         }
 
-        environment["mcp.RequestServices"] = _services;
+        using var scope = _services.CreateScope();
+        environment["mcp.RequestServices"] = scope.ServiceProvider;
 
         var requestMethod = (string)environment["owin.RequestMethod"]!;
-        return requestMethod.ToUpperInvariant() switch
+        var requestTask = requestMethod.ToUpperInvariant() switch
         {
             "POST" => _handler.HandlePostAsync(environment),
             "GET" => _handler.HandleGetAsync(environment),
             "DELETE" => _handler.HandleDeleteAsync(environment),
             _ => NotFoundAsync(environment),
         };
+        await requestTask;
     }
 
     private static Task NotFoundAsync(IDictionary<string, object> environment)
@@ -54,9 +55,6 @@ public sealed class OwinMcpMiddleware
     }
 }
 
-/// <summary>
-/// OWIN app builder extensions for registering the MCP middleware.
-/// </summary>
 /// <summary>
 /// Extension methods for registering the MCP OWIN middleware.
 /// </summary>

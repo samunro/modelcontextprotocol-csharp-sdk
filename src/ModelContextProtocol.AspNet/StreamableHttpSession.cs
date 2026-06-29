@@ -1,4 +1,5 @@
 using ModelContextProtocol.Server;
+using System.Security.Claims;
 
 namespace ModelContextProtocol.AspNet;
 
@@ -6,6 +7,7 @@ internal sealed class StreamableHttpSession(
     string sessionId,
     StreamableHttpServerTransport transport,
     McpServer server,
+    UserIdClaim? userId,
     StatefulSessionManager sessionManager) : IAsyncDisposable
 {
     private readonly CancellationTokenSource _disposeCts = new();
@@ -22,6 +24,8 @@ internal sealed class StreamableHttpSession(
     public bool IsActive => !SessionClosed.IsCancellationRequested && Volatile.Read(ref _referenceCount) > 0;
     public long LastActivityTicks { get; private set; } = sessionManager.GetTimestamp();
     public Task ServerRunTask { get; set; } = Task.CompletedTask;
+
+    public bool HasSameUserId(ClaimsPrincipal user) => userId == StreamableHttpHandler.GetUserIdClaim(user);
 
     public async ValueTask<IAsyncDisposable> AcquireReferenceAsync(CancellationToken cancellationToken)
     {

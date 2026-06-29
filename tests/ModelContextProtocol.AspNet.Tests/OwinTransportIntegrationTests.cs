@@ -1,7 +1,10 @@
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Owin.Builder;
 using ModelContextProtocol.Client;
 using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
+using Owin;
+using System.Security.Claims;
 using System.Net.Http;
 using System.Text;
 using Xunit;
@@ -23,6 +26,7 @@ public class OwinTransportIntegrationTests
         var requestHeaders = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
         {
             ["Accept"] = new[] { "application/json, text/event-stream" },
+            ["Content-Type"] = new[] { "application/json" },
         };
         var environment = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase)
         {
@@ -44,6 +48,88 @@ public class OwinTransportIntegrationTests
         Assert.Contains("valid JSON-RPC message", payload);
         Assert.Equal(400, environment["owin.ResponseStatusCode"]);
         Assert.Equal("application/json", responseHeaders["Content-Type"][0]);
+    }
+
+    [Fact]
+    public async Task HandlePostAsync_RejectsMissingJsonContentType()
+    {
+        var services = CreateServices();
+        await using var provider = services.BuildServiceProvider();
+        var handler = provider.GetRequiredService<StreamableHttpHandler>();
+
+        var environment = CreateOwinEnvironment(
+            provider,
+            "POST",
+            "{}",
+            new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["Accept"] = new[] { "application/json, text/event-stream" },
+            });
+
+        await handler.HandlePostAsync(environment);
+
+        Assert.Equal(415, environment["owin.ResponseStatusCode"]);
+    }
+
+    [Fact]
+    public async Task StatefulSession_RejectsDifferentAuthenticatedUser()
+    {
+        var services = CreateServices(stateless: false);
+        await using var provider = services.BuildServiceProvider();
+        var handler = provider.GetRequiredService<StreamableHttpHandler>();
+
+        var initializeEnvironment = CreateOwinEnvironment(
+            provider,
+            "POST",
+            InitializeRequest,
+            JsonPostHeaders(),
+            CreateUser("alice"));
+
+        await handler.HandlePostAsync(initializeEnvironment);
+
+        var responseHeaders = (IDictionary<string, string[]>)initializeEnvironment["owin.ResponseHeaders"];
+        var sessionId = Assert.Single(responseHeaders["mcp-session-id"]);
+
+        var nextHeaders = JsonPostHeaders();
+        nextHeaders["mcp-session-id"] = new[] { sessionId };
+        var nextEnvironment = CreateOwinEnvironment(
+            provider,
+            "POST",
+            ListToolsRequest,
+            nextHeaders,
+            CreateUser("bob"));
+
+        await handler.HandlePostAsync(nextEnvironment);
+
+        Assert.Equal(403, nextEnvironment["owin.ResponseStatusCode"]);
+    }
+
+    [Fact]
+    public async Task OwinMiddleware_UsesRequestScopeForMcpRequestServices()
+    {
+        ScopedProbe? resolvedProbe = null;
+        var services = CreateServices(configureTransport: options =>
+        {
+            options.ConfigureSessionOptions = (environment, _, _) =>
+            {
+                var requestServices = (IServiceProvider)environment["mcp.RequestServices"];
+                resolvedProbe = requestServices.GetRequiredService<ScopedProbe>();
+                return Task.CompletedTask;
+            };
+        });
+        services.AddScoped<ScopedProbe>();
+
+        await using var provider = services.BuildServiceProvider();
+        var app = new AppBuilder();
+        app.UseMcp(provider);
+        var middleware = (Func<IDictionary<string, object>, Task>)app.Build(typeof(Func<IDictionary<string, object>, Task>));
+
+        var environment = CreateOwinEnvironment(provider, "POST", InitializeRequest, JsonPostHeaders());
+
+        await middleware(environment);
+
+        Assert.NotNull(resolvedProbe);
+        Assert.True(resolvedProbe.Disposed);
     }
 
     [Fact]
@@ -112,7 +198,9 @@ public class OwinTransportIntegrationTests
         Assert.Contains(tools, tool => tool.Name == "echo");
     }
 
-    private static ServiceCollection CreateServices(bool stateless = true)
+    private static ServiceCollection CreateServices(
+        bool stateless = true,
+        Action<HttpServerTransportOptions>? configureTransport = null)
     {
         var services = new ServiceCollection();
         services.AddLogging();
@@ -120,9 +208,64 @@ public class OwinTransportIntegrationTests
             {
                 options.ServerInfo = new Implementation { Name = "OwinIntegrationServer", Version = "1.0.0" };
             })
-            .WithHttpTransport(options => options.Stateless = stateless)
+            .WithHttpTransport(options =>
+            {
+                options.Stateless = stateless;
+                configureTransport?.Invoke(options);
+            })
             .WithTools([McpServerTool.Create((string text) => $"Echo: {text}", new() { Name = "echo" })]);
         return services;
+    }
+
+    private const string InitializeRequest = """
+        {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"test","version":"1.0.0"}}}
+        """;
+
+    private const string ListToolsRequest = """
+        {"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}
+        """;
+
+    private static Dictionary<string, string[]> JsonPostHeaders() =>
+        new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Accept"] = new[] { "application/json, text/event-stream" },
+            ["Content-Type"] = new[] { "application/json" },
+        };
+
+    private static Dictionary<string, object> CreateOwinEnvironment(
+        IServiceProvider services,
+        string method,
+        string body,
+        IDictionary<string, string[]> requestHeaders,
+        ClaimsPrincipal? user = null)
+    {
+        var environment = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["owin.RequestMethod"] = method,
+            ["owin.RequestPath"] = "/",
+            ["owin.RequestBody"] = new MemoryStream(Encoding.UTF8.GetBytes(body)),
+            ["owin.RequestHeaders"] = requestHeaders,
+            ["owin.ResponseHeaders"] = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase),
+            ["owin.ResponseBody"] = new MemoryStream(),
+            ["mcp.RequestServices"] = services,
+        };
+
+        if (user is not null)
+        {
+            environment["server.User"] = user;
+        }
+
+        return environment;
+    }
+
+    private static ClaimsPrincipal CreateUser(string id) =>
+        new(new ClaimsIdentity(new[] { new Claim(ClaimTypes.NameIdentifier, id) }, "Test"));
+
+    private sealed class ScopedProbe : IDisposable
+    {
+        public bool Disposed { get; private set; }
+
+        public void Dispose() => Disposed = true;
     }
 
     private sealed class OwinMcpHttpMessageHandler(IServiceProvider services) : HttpMessageHandler
