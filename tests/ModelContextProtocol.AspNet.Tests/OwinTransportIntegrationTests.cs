@@ -4,7 +4,6 @@ using ModelContextProtocol.Client;
 using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
 using Owin;
-using System.Security.Claims;
 using System.Net.Http;
 using System.Text;
 using Xunit;
@@ -72,36 +71,44 @@ public class OwinTransportIntegrationTests
     }
 
     [Fact]
-    public async Task StatefulSession_RejectsDifferentAuthenticatedUser()
+    public async Task HandlePostAsync_RejectsMcpSessionIdHeader()
     {
-        var services = CreateServices(stateless: false);
+        var services = CreateServices();
         await using var provider = services.BuildServiceProvider();
         var handler = provider.GetRequiredService<StreamableHttpHandler>();
 
-        var initializeEnvironment = CreateOwinEnvironment(
-            provider,
-            "POST",
-            InitializeRequest,
-            JsonPostHeaders(),
-            CreateUser("alice"));
-
-        await handler.HandlePostAsync(initializeEnvironment);
-
-        var responseHeaders = (IDictionary<string, string[]>)initializeEnvironment["owin.ResponseHeaders"];
-        var sessionId = Assert.Single(responseHeaders["mcp-session-id"]);
-
-        var nextHeaders = JsonPostHeaders();
-        nextHeaders["mcp-session-id"] = new[] { sessionId };
-        var nextEnvironment = CreateOwinEnvironment(
+        var headers = JsonPostHeaders();
+        headers["mcp-session-id"] = new[] { "abc" };
+        var environment = CreateOwinEnvironment(
             provider,
             "POST",
             ListToolsRequest,
-            nextHeaders,
-            CreateUser("bob"));
+            headers);
 
-        await handler.HandlePostAsync(nextEnvironment);
+        await handler.HandlePostAsync(environment);
 
-        Assert.Equal(403, nextEnvironment["owin.ResponseStatusCode"]);
+        Assert.Equal(400, environment["owin.ResponseStatusCode"]);
+    }
+
+    [Fact]
+    public async Task HandleGetAsync_ReturnsMethodNotAllowed()
+    {
+        var services = CreateServices();
+        await using var provider = services.BuildServiceProvider();
+        var handler = provider.GetRequiredService<StreamableHttpHandler>();
+
+        var environment = CreateOwinEnvironment(
+            provider,
+            "GET",
+            string.Empty,
+            new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["Accept"] = new[] { "text/event-stream" },
+            });
+
+        await handler.HandleGetAsync(environment);
+
+        Assert.Equal(405, environment["owin.ResponseStatusCode"]);
     }
 
     [Fact]
@@ -169,9 +176,9 @@ public class OwinTransportIntegrationTests
     }
 
     [Fact]
-    public async Task OwinEndpoint_StatefulMode_ReusesSession()
+    public async Task OwinEndpoint_DoesNotReturnSessionId()
     {
-        var services = CreateServices(stateless: false);
+        var services = CreateServices();
         await using var provider = services.BuildServiceProvider();
         var httpClient = new HttpClient(new OwinMcpHttpMessageHandler(provider))
         {
@@ -182,24 +189,23 @@ public class OwinTransportIntegrationTests
             new HttpClientTransport(new HttpClientTransportOptions
             {
                 Endpoint = new Uri("http://localhost/"),
-                Name = "OWIN stateful integration client",
+                Name = "OWIN stateless integration client",
                 TransportMode = HttpTransportMode.StreamableHttp,
             }, httpClient, ownsHttpClient: true),
             new McpClientOptions
             {
-                ClientInfo = new Implementation { Name = "OWIN stateful integration test", Version = "1.0.0" },
+                ClientInfo = new Implementation { Name = "OWIN stateless integration test", Version = "1.0.0" },
                 ProtocolVersion = "2025-11-25",
             },
             cancellationToken: TestContext.Current.CancellationToken);
 
-        Assert.False(string.IsNullOrEmpty(client.SessionId));
+        Assert.True(string.IsNullOrEmpty(client.SessionId));
 
         var tools = await client.ListToolsAsync(cancellationToken: TestContext.Current.CancellationToken);
         Assert.Contains(tools, tool => tool.Name == "echo");
     }
 
     private static ServiceCollection CreateServices(
-        bool stateless = true,
         Action<HttpServerTransportOptions>? configureTransport = null)
     {
         var services = new ServiceCollection();
@@ -210,7 +216,6 @@ public class OwinTransportIntegrationTests
             })
             .WithHttpTransport(options =>
             {
-                options.Stateless = stateless;
                 configureTransport?.Invoke(options);
             })
             .WithTools([McpServerTool.Create((string text) => $"Echo: {text}", new() { Name = "echo" })]);
@@ -237,7 +242,7 @@ public class OwinTransportIntegrationTests
         string method,
         string body,
         IDictionary<string, string[]> requestHeaders,
-        ClaimsPrincipal? user = null)
+        object? user = null)
     {
         var environment = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase)
         {
@@ -257,9 +262,6 @@ public class OwinTransportIntegrationTests
 
         return environment;
     }
-
-    private static ClaimsPrincipal CreateUser(string id) =>
-        new(new ClaimsIdentity(new[] { new Claim(ClaimTypes.NameIdentifier, id) }, "Test"));
 
     private sealed class ScopedProbe : IDisposable
     {

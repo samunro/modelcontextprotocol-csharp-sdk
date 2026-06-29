@@ -15,7 +15,6 @@ public static class HttpMcpServerBuilderExtensions
     {
         Throw.IfNull(builder);
 
-        builder.Services.TryAddSingleton<StatefulSessionManager>();
         builder.Services.TryAddSingleton<StreamableHttpHandler>();
 
         if (configureOptions is not null)
