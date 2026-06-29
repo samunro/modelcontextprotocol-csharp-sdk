@@ -1,0 +1,38 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFrameworks>net48;netstandard2.0</TargetFrameworks>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <IsPackable>true</IsPackable>
+    <PackageId>ModelContextProtocol.AspNet</PackageId>
+    <Description>OWIN/System.Web hosting extensions for the C# Model Context Protocol (MCP) SDK.</Description>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <EnablePackageValidation>false</EnablePackageValidation>
+    <NoWarn>$(NoWarn);MCPEXP001;NU1701</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="..\Common\Throw.cs" Link="Throw.cs" />
+    <Compile Include="..\Common\Experimentals.cs" Link="Experimentals.cs" />
+    <Compile Include="..\Common\Obsoletions.cs" Link="Obsoletions.cs" />
+    <Compile Include="..\Common\McpHttpHeaders.cs" Link="McpHttpHeaders.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\ModelContextProtocol\ModelContextProtocol.csproj" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(TargetFramework)' == 'net48'">
+    <PackageReference Include="Microsoft.Owin" />
+    <PackageReference Include="Microsoft.Owin.Host.HttpListener" />
+    <PackageReference Include="Microsoft.Owin.Hosting" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(TargetFramework)' == 'netstandard2.0'">
+    <PackageReference Include="Microsoft.Owin" />
+  </ItemGroup>
+
+</Project>
