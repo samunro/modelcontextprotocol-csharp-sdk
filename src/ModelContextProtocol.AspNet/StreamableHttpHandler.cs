@@ -149,6 +149,12 @@ public sealed class StreamableHttpHandler
     {
         var context = new OwinMcpContext(environment);
 
+        if (!ValidateProtocolVersionHeader(context, out var protocolVersionError))
+        {
+            await WriteJsonRpcErrorDetailAsync(context, protocolVersionError, 400);
+            return;
+        }
+
         if (HttpServerTransportOptions.Stateless)
         {
             await WriteJsonRpcErrorAsync(context, "Bad Request: GET requests are not supported in stateless mode.", 400);
@@ -168,9 +174,24 @@ public sealed class StreamableHttpHandler
             return;
         }
 
+        if (!session.TryStartGetRequest())
+        {
+            await WriteJsonRpcErrorAsync(
+                context,
+                "Bad Request: This server does not support multiple GET requests. Start a new session.",
+                400);
+            return;
+        }
+
         await using var reference = await session.AcquireReferenceAsync(context.RequestAborted);
         InitializeSseResponse(context);
-        await session.Transport.HandleGetRequestAsync(context.ResponseBody, context.RequestAborted);
+        try
+        {
+            await session.Transport.HandleGetRequestAsync(context.ResponseBody, context.RequestAborted);
+        }
+        catch (OperationCanceledException) when (context.RequestAborted.IsCancellationRequested)
+        {
+        }
     }
 
     /// <summary>

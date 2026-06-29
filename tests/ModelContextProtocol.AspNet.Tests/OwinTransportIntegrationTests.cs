@@ -2,6 +2,7 @@ using Microsoft.Extensions.DependencyInjection;
 using ModelContextProtocol.Client;
 using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
+using System.Net.Http;
 using System.Text;
 using Xunit;
 
@@ -34,11 +35,11 @@ public class OwinTransportIntegrationTests
             ["mcp.RequestServices"] = provider,
         };
 
-        await handler.HandlePostAsync(environment).WaitAsync(TestContext.Current.CancellationToken);
+        await handler.HandlePostAsync(environment);
 
         responseBody.Position = 0;
-        var payload = await new StreamReader(responseBody, Encoding.UTF8, detectEncodingFromByteOrderMarks: false, leaveOpen: true)
-            .ReadToEndAsync(TestContext.Current.CancellationToken);
+        var payload = await new StreamReader(responseBody, Encoding.UTF8, detectEncodingFromByteOrderMarks: false, bufferSize: 1024, leaveOpen: true)
+            .ReadToEndAsync();
 
         Assert.Contains("valid JSON-RPC message", payload);
         Assert.Equal(400, environment["owin.ResponseStatusCode"]);
@@ -132,7 +133,7 @@ public class OwinTransportIntegrationTests
             var requestBody = new MemoryStream();
             if (request.Content is not null)
             {
-                await request.Content.CopyToAsync(requestBody, cancellationToken);
+                await request.Content.CopyToAsync(requestBody);
                 requestBody.Position = 0;
             }
 
