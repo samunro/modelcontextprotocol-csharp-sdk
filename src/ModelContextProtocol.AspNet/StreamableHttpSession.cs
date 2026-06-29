@@ -2,27 +2,18 @@ using ModelContextProtocol.Server;
 
 namespace ModelContextProtocol.AspNet;
 
-internal sealed class StreamableHttpSession : IAsyncDisposable
+internal sealed class StreamableHttpSession(
+    string sessionId,
+    StreamableHttpServerTransport transport,
+    McpServer server,
+    StatefulSessionManager sessionManager) : IAsyncDisposable
 {
-    private readonly StatefulSessionManager _sessionManager;
     private readonly CancellationTokenSource _disposeCts = new();
     private int _started;
 
-    public StreamableHttpSession(
-        string sessionId,
-        StreamableHttpServerTransport transport,
-        McpServer server,
-        StatefulSessionManager sessionManager)
-    {
-        Id = sessionId;
-        Transport = transport;
-        Server = server;
-        _sessionManager = sessionManager;
-    }
-
-    public string Id { get; }
-    public StreamableHttpServerTransport Transport { get; }
-    public McpServer Server { get; }
+    public string Id { get; } = sessionId;
+    public StreamableHttpServerTransport Transport { get; } = transport;
+    public McpServer Server { get; } = server;
     public CancellationToken SessionClosed => _disposeCts.Token;
     public Task ServerRunTask { get; set; } = Task.CompletedTask;
 
@@ -35,7 +26,7 @@ internal sealed class StreamableHttpSession : IAsyncDisposable
 
         if (!Transport.Stateless && Interlocked.Exchange(ref _started, 1) == 0)
         {
-            await _sessionManager.StartNewSessionAsync(this, cancellationToken);
+            await sessionManager.StartNewSessionAsync(this, cancellationToken);
         }
 
         return new NoopAsyncDisposable();

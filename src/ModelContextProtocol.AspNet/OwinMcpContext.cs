@@ -2,16 +2,9 @@ using System.Security.Claims;
 
 namespace ModelContextProtocol.AspNet;
 
-internal sealed class OwinMcpContext
+internal sealed class OwinMcpContext(IDictionary<string, object> environment)
 {
-    private readonly IDictionary<string, object> _environment;
-
-    public OwinMcpContext(IDictionary<string, object> environment)
-    {
-        _environment = environment;
-    }
-
-    public IDictionary<string, object> EnvironmentView => _environment;
+    public IDictionary<string, object> EnvironmentView => environment;
 
     public string Method => GetRequired<string>("owin.RequestMethod");
     public string Path => GetRequired<string>("owin.RequestPath");
@@ -21,12 +14,12 @@ internal sealed class OwinMcpContext
     public IDictionary<string, string[]> ResponseHeaders => GetRequired<IDictionary<string, string[]>>("owin.ResponseHeaders");
 
     public CancellationToken RequestAborted =>
-        _environment.TryGetValue("owin.CallCancelled", out var value) && value is CancellationToken cancellationToken
+        environment.TryGetValue("owin.CallCancelled", out var value) && value is CancellationToken cancellationToken
             ? cancellationToken
             : CancellationToken.None;
 
     public IServiceProvider RequestServices =>
-        _environment.TryGetValue("mcp.RequestServices", out var value) && value is IServiceProvider services
+        environment.TryGetValue("mcp.RequestServices", out var value) && value is IServiceProvider services
             ? services
             : throw new InvalidOperationException("No MCP request services were available for this OWIN request.");
 
@@ -34,12 +27,12 @@ internal sealed class OwinMcpContext
     {
         get
         {
-            if (_environment.TryGetValue("server.User", out var serverUser) && serverUser is ClaimsPrincipal serverPrincipal)
+            if (environment.TryGetValue("server.User", out var serverUser) && serverUser is ClaimsPrincipal serverPrincipal)
             {
                 return serverPrincipal;
             }
 
-            if (_environment.TryGetValue("owin.RequestUser", out var owinUser) && owinUser is ClaimsPrincipal owinPrincipal)
+            if (environment.TryGetValue("owin.RequestUser", out var owinUser) && owinUser is ClaimsPrincipal owinPrincipal)
             {
                 return owinPrincipal;
             }
@@ -50,8 +43,8 @@ internal sealed class OwinMcpContext
 
     public int StatusCode
     {
-        get => _environment.TryGetValue("owin.ResponseStatusCode", out var value) && value is int statusCode ? statusCode : 200;
-        set => _environment["owin.ResponseStatusCode"] = value;
+        get => environment.TryGetValue("owin.ResponseStatusCode", out var value) && value is int statusCode ? statusCode : 200;
+        set => environment["owin.ResponseStatusCode"] = value;
     }
 
     public string GetRequestHeader(string name)
@@ -75,7 +68,7 @@ internal sealed class OwinMcpContext
 
     private T GetRequired<T>(string key)
     {
-        if (_environment.TryGetValue(key, out var value) && value is T typed)
+        if (environment.TryGetValue(key, out var value) && value is T typed)
         {
             return typed;
         }

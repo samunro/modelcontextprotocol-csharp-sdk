@@ -13,12 +13,12 @@ public class OwinTransportIntegrationTests
     public async Task HandlePostAsync_WritesJsonErrorForInvalidRequest()
     {
         var services = CreateServices();
-        using var provider = services.BuildServiceProvider();
+        await using var provider = services.BuildServiceProvider();
         var handler = provider.GetRequiredService<StreamableHttpHandler>();
 
         var responseHeaders = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase);
         var responseBody = new MemoryStream();
-        var requestBody = new MemoryStream(Encoding.UTF8.GetBytes("not-json"));
+        var requestBody = new MemoryStream("not-json"u8.ToArray());
         var requestHeaders = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
         {
             ["Accept"] = new[] { "application/json, text/event-stream" },
@@ -49,7 +49,7 @@ public class OwinTransportIntegrationTests
     public async Task OwinEndpoint_ConnectsMcpClientAndCallsTool()
     {
         var services = CreateServices();
-        using var provider = services.BuildServiceProvider();
+        await using var provider = services.BuildServiceProvider();
         var httpClient = new HttpClient(new OwinMcpHttpMessageHandler(provider))
         {
             BaseAddress = new Uri("http://localhost/"),
@@ -85,7 +85,7 @@ public class OwinTransportIntegrationTests
     public async Task OwinEndpoint_StatefulMode_ReusesSession()
     {
         var services = CreateServices(stateless: false);
-        using var provider = services.BuildServiceProvider();
+        await using var provider = services.BuildServiceProvider();
         var httpClient = new HttpClient(new OwinMcpHttpMessageHandler(provider))
         {
             BaseAddress = new Uri("http://localhost/"),
@@ -124,18 +124,11 @@ public class OwinTransportIntegrationTests
         return services;
     }
 
-    private sealed class OwinMcpHttpMessageHandler : HttpMessageHandler
+    private sealed class OwinMcpHttpMessageHandler(IServiceProvider services) : HttpMessageHandler
     {
-        private readonly IServiceProvider _services;
-
-        public OwinMcpHttpMessageHandler(IServiceProvider services)
-        {
-            _services = services;
-        }
-
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
-            var handler = _services.GetRequiredService<StreamableHttpHandler>();
+            var handler = services.GetRequiredService<StreamableHttpHandler>();
             var requestBody = new MemoryStream();
             if (request.Content is not null)
             {
@@ -168,7 +161,7 @@ public class OwinTransportIntegrationTests
                 ["owin.ResponseHeaders"] = responseHeaders,
                 ["owin.ResponseBody"] = responseBody,
                 ["owin.CallCancelled"] = cancellationToken,
-                ["mcp.RequestServices"] = _services,
+                ["mcp.RequestServices"] = services,
             };
 
             switch (request.Method.Method.ToUpperInvariant())

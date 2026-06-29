@@ -1,7 +1,4 @@
-using ModelContextProtocol;
 using Owin;
-using System.Collections.Generic;
-using System.Threading.Tasks;
 
 namespace ModelContextProtocol.AspNet;
 
@@ -68,18 +65,6 @@ public static class OwinMcpAppBuilderExtensions
     /// <summary>
     /// Adds the MCP middleware to the OWIN pipeline.
     /// </summary>
-    public static IAppBuilder UseMcp(this IAppBuilder app, StreamableHttpHandler handler, IServiceProvider services)
-    {
-        Throw.IfNull(app);
-        Throw.IfNull(handler);
-        Throw.IfNull(services);
-
-        return app.Use(typeof(OwinMcpMiddleware), handler, services);
-    }
-
-    /// <summary>
-    /// Adds the MCP middleware to the OWIN pipeline.
-    /// </summary>
     public static IAppBuilder UseMcp(this IAppBuilder app, IServiceProvider services)
     {
         Throw.IfNull(app);
@@ -91,6 +76,6 @@ public static class OwinMcpAppBuilderExtensions
             throw new InvalidOperationException("You must call AddMcpServer().WithHttpTransport() before registering MCP OWIN middleware.");
         }
 
-        return app.UseMcp(handler, services);
+        return app.Use(typeof(OwinMcpMiddleware), handler, services);
     }
 }

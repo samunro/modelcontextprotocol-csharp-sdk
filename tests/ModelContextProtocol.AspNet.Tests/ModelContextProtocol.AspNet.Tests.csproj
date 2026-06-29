@@ -12,10 +12,11 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" />
     <PackageReference Include="Microsoft.Bcl.AsyncInterfaces" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
+    <PackageReference Include="Microsoft.Extensions.Logging" />
     <PackageReference Include="Microsoft.Owin" />
     <PackageReference Include="xunit.v3" />
     <PackageReference Include="xunit.runner.visualstudio" />
-    <PackageReference Include="Microsoft.Extensions.Hosting" />
     <PackageReference Include="System.Net.Http" />
     <PackageReference Include="Microsoft.Owin.Hosting" />
     <PackageReference Include="Microsoft.Owin.Host.HttpListener" />

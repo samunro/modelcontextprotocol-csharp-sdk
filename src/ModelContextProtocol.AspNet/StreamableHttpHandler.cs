@@ -16,7 +16,7 @@ public sealed class StreamableHttpHandler
     private const string McpSessionIdHeaderName = McpHttpHeaders.SessionId;
     private const string McpProtocolVersionHeaderName = McpHttpHeaders.ProtocolVersion;
 
-    private static readonly HashSet<string> s_supportedProtocolVersions = new(StringComparer.Ordinal)
+    private static readonly HashSet<string> SupportedProtocolVersions = new(StringComparer.Ordinal)
     {
         "2024-11-05",
         "2025-03-26",
@@ -25,9 +25,9 @@ public sealed class StreamableHttpHandler
         McpHttpHeaders.July2026ProtocolVersion,
     };
 
-    private static readonly JsonTypeInfo<JsonRpcMessage> s_messageTypeInfo = GetRequiredJsonTypeInfo<JsonRpcMessage>();
-    private static readonly JsonTypeInfo<JsonRpcError> s_errorTypeInfo = GetRequiredJsonTypeInfo<JsonRpcError>();
-    private static readonly JsonTypeInfo<UnsupportedProtocolVersionErrorData> s_unsupportedProtocolVersionTypeInfo =
+    private static readonly JsonTypeInfo<JsonRpcMessage> MessageTypeInfo = GetRequiredJsonTypeInfo<JsonRpcMessage>();
+    private static readonly JsonTypeInfo<JsonRpcError> ErrorTypeInfo = GetRequiredJsonTypeInfo<JsonRpcError>();
+    private static readonly JsonTypeInfo<UnsupportedProtocolVersionErrorData> UnsupportedProtocolVersionTypeInfo =
         GetRequiredJsonTypeInfo<UnsupportedProtocolVersionErrorData>();
 
     private readonly IOptions<McpServerOptions> _mcpServerOptionsSnapshot;
@@ -118,7 +118,7 @@ public sealed class StreamableHttpHandler
             }
         }
 
-        var toolCollection = _mcpServerOptionsSnapshot.Value?.ToolCollection;
+        var toolCollection = _mcpServerOptionsSnapshot.Value.ToolCollection;
         if (!ValidateMcpHeaders(context, message, toolCollection, out var errorMessage))
         {
             await WriteJsonRpcErrorAsync(context, errorMessage, 400, (int)McpErrorCode.HeaderMismatch);
@@ -317,7 +317,7 @@ public sealed class StreamableHttpHandler
 
     private static async Task<JsonRpcMessage?> ReadJsonRpcMessageAsync(OwinMcpContext context)
     {
-        var message = await JsonSerializer.DeserializeAsync(context.RequestBody, s_messageTypeInfo, context.RequestAborted);
+        var message = await JsonSerializer.DeserializeAsync(context.RequestBody, MessageTypeInfo, context.RequestAborted);
         if (message is not null)
         {
             var protocolVersion = context.GetRequestHeader(McpProtocolVersionHeaderName);
@@ -353,7 +353,7 @@ public sealed class StreamableHttpHandler
     private static bool ValidateProtocolVersionHeader(OwinMcpContext context, [NotNullWhen(false)] out JsonRpcErrorDetail? errorDetail)
     {
         var protocolVersionHeader = context.GetRequestHeader(McpProtocolVersionHeaderName);
-        if (!string.IsNullOrEmpty(protocolVersionHeader) && !s_supportedProtocolVersions.Contains(protocolVersionHeader))
+        if (!string.IsNullOrEmpty(protocolVersionHeader) && !SupportedProtocolVersions.Contains(protocolVersionHeader))
         {
             errorDetail = new JsonRpcErrorDetail
             {
@@ -362,10 +362,10 @@ public sealed class StreamableHttpHandler
                 Data = JsonSerializer.SerializeToNode(
                     new UnsupportedProtocolVersionErrorData
                     {
-                        Supported = s_supportedProtocolVersions.ToArray(),
+                        Supported = SupportedProtocolVersions.ToArray(),
                         Requested = protocolVersionHeader,
                     },
-                    s_unsupportedProtocolVersionTypeInfo),
+                    UnsupportedProtocolVersionTypeInfo),
             };
             return false;
         }
@@ -482,7 +482,7 @@ public sealed class StreamableHttpHandler
     {
         context.StatusCode = statusCode;
         context.SetResponseHeader("Content-Type", "application/json");
-        await JsonSerializer.SerializeAsync(context.ResponseBody, jsonRpcError, s_errorTypeInfo, context.RequestAborted);
+        await JsonSerializer.SerializeAsync(context.ResponseBody, jsonRpcError, ErrorTypeInfo, context.RequestAborted);
         await context.ResponseBody.FlushAsync(context.RequestAborted);
     }
 

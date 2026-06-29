@@ -2,7 +2,6 @@ using Microsoft.Extensions.DependencyInjection;
 using ModelContextProtocol.AspNet;
 using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
-using Owin;
 
 var services = new ServiceCollection();
 services.AddLogging();
